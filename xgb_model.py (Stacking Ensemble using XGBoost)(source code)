@@ -1,0 +1,66 @@
+# xgb_model.py
+import pandas as pd
+import numpy as np
+import xgboost as xgb
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import matplotlib.pyplot as plt
+
+# Load base model predictions (make sure these files exist)
+lr_preds = pd.read_csv('lr_predictions.csv')['lr_pred'].values
+rf_preds = pd.read_csv('rf_predictions.csv')['rf_pred'].values
+cnn_preds = pd.read_csv('cnn_predictions.csv')['cnn_pred'].values
+
+# For demonstration purposes, we load the LR data to simulate the test target values
+lr_data = pd.read_csv('data/更新线性回归600.csv')
+y = lr_data.iloc[:, 6].values
+
+# Recreate a train-test split to get corresponding y_test
+from sklearn.model_selection import train_test_split
+_, y_test, _, _ = train_test_split(np.arange(len(y)), y, test_size=0.2, random_state=42)
+
+# Stack the predictions to form meta features
+meta_X = np.column_stack((lr_preds, cnn_preds, rf_preds))
+meta_y = y_test  # For demonstration, using the simulated y_test from LR data
+
+# Train an XGBoost regressor as the meta model
+xgb_model = xgb.XGBRegressor(
+    objective='reg:squarederror',
+    n_estimators=100,
+    learning_rate=0.1,
+    random_state=42
+)
+# In a real scenario, you should have a proper training split for meta-model training
+xgb_model.fit(meta_X, meta_y, eval_metric='rmse')
+
+# Predict using the meta model
+meta_y_pred = xgb_model.predict(meta_X)
+
+# Evaluate the meta model
+mse = mean_squared_error(meta_y, meta_y_pred)
+rmse = np.sqrt(mse)
+mae = mean_absolute_error(meta_y, meta_y_pred)
+r2 = r2_score(meta_y, meta_y_pred)
+print("XGBoost Meta Model Evaluation:")
+print("MSE: {:.4f}".format(mse))
+print("RMSE: {:.4f}".format(rmse))
+print("MAE: {:.4f}".format(mae))
+print("R²: {:.4f}".format(r2))
+
+# Plot epoch-loss curve for the XGBoost model
+results = xgb_model.evals_result()
+if results and 'validation_0' in results:
+    epochs = len(results['validation_0']['rmse'])
+    x_axis = range(epochs)
+    plt.figure(figsize=(10,6))
+    plt.plot(x_axis, results['validation_0']['rmse'], label='Train RMSE', marker='o')
+    plt.plot(x_axis, results['validation_1']['rmse'], label='Validation RMSE', marker='x')
+    plt.xlabel('Epoch')
+    plt.ylabel('RMSE')
+    plt.title('XGBoost RMSE Loss Curve (Meta Model)')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+# Save the meta model predictions
+pd.DataFrame({'xgb_meta_pred': meta_y_pred}).to_csv('xgb_meta_predictions.csv', index=False)
